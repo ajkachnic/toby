@@ -2,11 +2,10 @@ mod envelope;
 mod filter;
 mod oscillator;
 
-use crate::oscillator::BlendOscillator;
 use envelope::EnvelopeStage;
 use nih_plug::prelude::*;
-use oscillator::VariableSawOscillator;
-use std::{io::Write, os::fd::FromRawFd, sync::Arc};
+use oscillator::analog::VariableSawOscillator;
+use std::{os::fd::FromRawFd, sync::Arc};
 
 pub struct Toby {
     params: Arc<TobyParams>,
