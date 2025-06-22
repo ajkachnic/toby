@@ -1,9 +1,11 @@
 pub mod analog;
 pub mod digital;
 pub mod engine;
+pub mod string_synth;
 pub mod super_square;
 
 pub use analog::VariableSawOscillator;
+pub use string_synth::StringSynthOscillator;
 pub use super_square::SuperSquareOscillator;
 
 // Ported from Mutable Instruments firmware

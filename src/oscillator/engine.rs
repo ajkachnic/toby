@@ -1,11 +1,14 @@
 use nih_plug::prelude::Enum;
 
-use crate::oscillator::{SuperSquareOscillator, VariableSawOscillator};
+use crate::oscillator::{
+    string_synth, StringSynthOscillator, SuperSquareOscillator, VariableSawOscillator,
+};
 
 #[derive(Enum, PartialEq, Debug, Clone, Copy)]
 pub enum OscillatorType {
     SuperSquare,
     VariableSaw,
+    StringSynth,
 }
 
 #[derive(Clone, Copy)]
@@ -17,6 +20,7 @@ pub struct OscillatorParams {
 pub struct OscillatorEngine {
     super_square: SuperSquareOscillator,
     variable_saw: VariableSawOscillator,
+    string_synth: StringSynthOscillator,
     pub selected: OscillatorType,
 }
 
@@ -25,6 +29,7 @@ impl OscillatorEngine {
         Self {
             super_square: SuperSquareOscillator::default(),
             variable_saw: VariableSawOscillator::default(),
+            string_synth: StringSynthOscillator::default(),
             selected: OscillatorType::SuperSquare,
         }
     }
@@ -47,6 +52,16 @@ impl OscillatorEngine {
                 self.variable_saw
                     .prepare_block(saw_pw, saw_shape, frequency, sample_rate);
             }
+            OscillatorType::StringSynth => {
+                let registration_index =
+                    (params.morph * (string_synth::REGISTRATION_TABLE.len() as f32 - 1.0)) as usize;
+                self.string_synth.prepare_block(
+                    &string_synth::REGISTRATION_TABLE[registration_index],
+                    params.shape,
+                    frequency,
+                    sample_rate,
+                );
+            }
         }
     }
 
@@ -54,6 +69,7 @@ impl OscillatorEngine {
         match self.selected {
             OscillatorType::SuperSquare => self.super_square.process(),
             OscillatorType::VariableSaw => self.variable_saw.process(frequency, sample_rate),
+            OscillatorType::StringSynth => self.string_synth.process(),
         }
     }
 }

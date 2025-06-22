@@ -108,6 +108,41 @@ impl Default for TobyParams {
     }
 }
 
+impl Toby {
+    fn allocate_voice(&mut self, note: u8, velocity: f32) {
+        // 1. find a voice with the same note id
+        for voice in self.voices.iter_mut() {
+            if voice.midi_note_id == note {
+                voice.trigger(note, velocity);
+                return;
+            }
+        }
+        // 2. find an inactive voice
+        for voice in self.voices.iter_mut() {
+            if !voice.is_active() {
+                voice.trigger(note, velocity);
+                return;
+            }
+        }
+
+        // 3. voice stealing: prefer an releasing voice
+        for voice in self.voices.iter_mut() {
+            if voice.envelope.stage == EnvelopeStage::Release {
+                voice.trigger(note, velocity);
+                return;
+            }
+        }
+
+        // 4. voice stealing: prefer the oldest voice
+        let victim = self
+            .voices
+            .iter_mut()
+            .max_by(|a, b| a.envelope.timer.partial_cmp(&b.envelope.timer).unwrap())
+            .unwrap();
+        victim.trigger(note, velocity);
+    }
+}
+
 impl Plugin for Toby {
     const NAME: &'static str = "Toby";
     const VENDOR: &'static str = "abstract audio";
@@ -187,9 +222,6 @@ impl Plugin for Toby {
         }
 
         for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
-            // Smoothing is optionally built into the parameters themselves
-
-            // This plugin can be either triggered by MIDI or controleld by a parameter
             while let Some(event) = next_event {
                 // If the event occured after the sample_time, stop
                 if event.timing() > sample_id as u32 {
@@ -197,53 +229,7 @@ impl Plugin for Toby {
                 }
 
                 match event {
-                    NoteEvent::NoteOn { note, velocity, .. } => {
-                        // multi-pass voice allocation
-                        let mut found_voice = false;
-
-                        // 1. find a voice with the same note id
-                        for voice in self.voices.iter_mut() {
-                            if voice.midi_note_id == note {
-                                voice.trigger(note, velocity);
-                                found_voice = true;
-                                break;
-                            }
-                        }
-
-                        // 2. find an inactive voice
-                        if !found_voice {
-                            for voice in self.voices.iter_mut() {
-                                if !voice.is_active() {
-                                    voice.trigger(note, velocity);
-                                    found_voice = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // 3. voice stealing: prefer an releasing voice
-                        if !found_voice {
-                            for voice in self.voices.iter_mut() {
-                                if voice.envelope.stage == EnvelopeStage::Release {
-                                    voice.trigger(note, velocity);
-                                    found_voice = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // 4. voice stealing: prefer the oldest voice
-                        if !found_voice {
-                            let victim = self
-                                .voices
-                                .iter_mut()
-                                .max_by(|a, b| {
-                                    a.envelope.timer.partial_cmp(&b.envelope.timer).unwrap()
-                                })
-                                .unwrap();
-                            victim.trigger(note, velocity);
-                        }
-                    }
+                    NoteEvent::NoteOn { note, velocity, .. } => self.allocate_voice(note, velocity),
                     NoteEvent::NoteOff { note, .. } => {
                         for voice in self.voices.iter_mut() {
                             if voice.midi_note_id == note {
