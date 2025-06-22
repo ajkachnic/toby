@@ -32,7 +32,7 @@ impl Default for VariableSawOscillator {
 }
 
 impl VariableSawOscillator {
-    pub fn prepare(&mut self, pw: f32, waveshape: f32, frequency: f32, sample_rate: f32) {
+    pub fn prepare_block(&mut self, pw: f32, waveshape: f32, frequency: f32, sample_rate: f32) {
         let phase_delta = frequency / sample_rate;
         let pw = if phase_delta >= 0.25 {
             0.5

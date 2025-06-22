@@ -4,10 +4,9 @@ mod oscillator;
 
 use envelope::EnvelopeStage;
 use nih_plug::prelude::*;
-use oscillator::analog::VariableSawOscillator;
 use std::sync::Arc;
 
-use crate::oscillator::super_square::SuperSquareOscillator;
+use crate::oscillator::engine::{OscillatorEngine, OscillatorParams, OscillatorType};
 
 pub struct Toby {
     params: Arc<TobyParams>,
@@ -21,7 +20,7 @@ pub struct Toby {
     /// The frequency if the active note, if triggered by MIDI.
     midi_note_freq: f32,
 
-    oscillator: SuperSquareOscillator,
+    oscillator: OscillatorEngine,
     filter: filter::Svf,
     envelope: envelope::ADSR,
 }
@@ -42,6 +41,9 @@ struct TobyParams {
 
     #[id = "morph"]
     pub morph: FloatParam,
+
+    #[id = "oscillator_type"]
+    pub oscillator_type: EnumParam<OscillatorType>,
 }
 
 impl Default for Toby {
@@ -55,7 +57,7 @@ impl Default for Toby {
             midi_note_id: 0,
             midi_note_freq: 1.0,
 
-            oscillator: SuperSquareOscillator::default(),
+            oscillator: OscillatorEngine::default(),
             filter: filter::Svf::default(),
             envelope: envelope::ADSR::default(),
         }
@@ -106,6 +108,8 @@ impl Default for TobyParams {
             morph: FloatParam::new("Morph", 0.2, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(3.0))
                 .with_step_size(0.01),
+
+            oscillator_type: EnumParam::new("Oscillator Type", OscillatorType::SuperSquare),
         }
     }
 }
@@ -166,6 +170,7 @@ impl Plugin for Toby {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        let samples = buffer.samples();
         let mut next_event = context.next_event();
         for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
             // Smoothing is optionally built into the parameters themselves
@@ -200,28 +205,15 @@ impl Plugin for Toby {
                 next_event = context.next_event();
             }
 
-            // This gain envelope prevents clicks with new notes and with released notes
-            let shape = self.params.shape.smoothed.next();
-            let morph = self.params.morph.smoothed.next();
+            let shape = self.params.shape.smoothed.next_step(samples as u32);
+            let morph = self.params.morph.smoothed.next_step(samples as u32);
+            let osc_params = OscillatorParams { shape, morph };
 
-            // let saw_pw = if morph < 0.5 {
-            //     morph + 0.5
-            // } else {
-            //     1.0 - (morph - 0.5) * 2.0
-            // };
+            let oscillator_type = self.params.oscillator_type.value();
+            self.oscillator.selected = oscillator_type;
 
-            // let saw_pw = (saw_pw * 1.1).clamp(0.005, 1.0);
-            // let saw_shape = (10.0 - 21.0 * morph).clamp(0.0, 1.0);
-
-            // self.oscillator
-            //     .prepare(saw_pw, saw_shape, self.midi_note_freq, self.sample_rate);
-            // let v = self
-            //     .oscillator
-            //     .process(self.midi_note_freq, self.sample_rate);
-
-            let normalized_frequency = self.midi_note_freq / (self.sample_rate + 0.000001);
             self.oscillator
-                .prepare(shape, normalized_frequency, self.sample_rate);
+                .prepare_block(osc_params, self.midi_note_freq, self.sample_rate);
 
             for sample in channel_samples {
                 let gain = self.params.gain.smoothed.next();
@@ -232,7 +224,7 @@ impl Plugin for Toby {
 
                 let v = self
                     .oscillator
-                    .process(normalized_frequency, self.sample_rate);
+                    .process(self.midi_note_freq, self.sample_rate);
 
                 let v = v * self.envelope.next(self.sample_rate);
 

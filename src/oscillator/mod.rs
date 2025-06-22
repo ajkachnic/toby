@@ -1,6 +1,10 @@
 pub mod analog;
 pub mod digital;
+pub mod engine;
 pub mod super_square;
+
+pub use analog::VariableSawOscillator;
+pub use super_square::SuperSquareOscillator;
 
 // Ported from Mutable Instruments firmware
 pub fn this_blep_sample(t: f32) -> f32 {
