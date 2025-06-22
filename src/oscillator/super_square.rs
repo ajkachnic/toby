@@ -19,11 +19,12 @@ pub struct SuperSquareOscillator {
 
 impl SuperSquareOscillator {
     pub fn prepare_block(&mut self, shape: f32, frequency: f32, sample_rate: f32) {
-        let master_frequency = frequency;
+        let phase_delta = frequency / sample_rate;
+        let master_frequency = phase_delta;
         let slave_frequency = if shape < 0.5 {
-            frequency * (0.51 + 0.98 * shape)
+            phase_delta * (0.51 + 0.98 * shape)
         } else {
-            frequency * (1.0 + 16.0 * (shape - 0.5) * (shape - 0.5))
+            phase_delta * (1.0 + 16.0 * (shape - 0.5) * (shape - 0.5))
         };
 
         self.master_frequency.set_target(

@@ -31,9 +31,8 @@ impl OscillatorEngine {
     pub fn prepare_block(&mut self, params: OscillatorParams, frequency: f32, sample_rate: f32) {
         match self.selected {
             OscillatorType::SuperSquare => {
-                let normalized_frequency = frequency / sample_rate;
                 self.super_square
-                    .prepare_block(params.shape, normalized_frequency, sample_rate);
+                    .prepare_block(params.shape, frequency, sample_rate);
             }
             OscillatorType::VariableSaw => {
                 let saw_pw = if params.morph < 0.5 {
@@ -43,7 +42,7 @@ impl OscillatorEngine {
                 };
 
                 let saw_pw = (saw_pw * 1.1).clamp(0.005, 1.0);
-                let saw_shape = (10.0 - 21.0 * params.morph).clamp(0.0, 1.0);
+                let saw_shape = (10.0 - 21.0 * params.shape).clamp(0.0, 1.0);
                 self.variable_saw
                     .prepare_block(saw_pw, saw_shape, frequency, sample_rate);
             }
