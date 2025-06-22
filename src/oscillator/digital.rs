@@ -1,4 +1,4 @@
-use std::f32::consts::{self, LN_2};
+use std::f32::consts;
 
 pub enum Shape {
     Saw,
@@ -7,9 +7,15 @@ pub enum Shape {
     Sine,
 }
 
+/// Simple digital oscillator implementation. Digital in the sense that these oscillators
+/// produce a pure value for their functions. There's no distortion or warping or wave-shaping.
+///
+/// The "analog" oscillators have more imperfections in their sound, matching how an analog VCO
+/// wouldn't produce a perfect or pure wave.
+#[allow(dead_code)]
 pub struct DigitalOscillator {
     phase: f32,
-    shape: Shape,
+    pub(crate) shape: Shape,
 }
 
 impl Default for DigitalOscillator {

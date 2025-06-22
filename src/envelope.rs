@@ -15,7 +15,7 @@ pub struct ADSR {
 impl Default for ADSR {
     fn default() -> Self {
         Self {
-            attack: 0.05,
+            attack: 0.5,
             decay: 0.001,
             sustain: 0.8,
             release: 0.1,

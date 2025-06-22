@@ -5,7 +5,7 @@ mod oscillator;
 use envelope::EnvelopeStage;
 use nih_plug::prelude::*;
 use oscillator::analog::VariableSawOscillator;
-use std::{os::fd::FromRawFd, sync::Arc};
+use std::sync::Arc;
 
 pub struct Toby {
     params: Arc<TobyParams>,
@@ -18,12 +18,6 @@ pub struct Toby {
     midi_note_id: u8,
     /// The frequency if the active note, if triggered by MIDI.
     midi_note_freq: f32,
-    /// A simple attack and release envelope to avoid clicks. Controlled through velocity and
-    /// aftertouch.
-    ///
-    /// Smoothing is built into the parameters, but you can also use them manually if you need to
-    /// smooth soemthing that isn't a parameter.
-    midi_note_gain: Smoother<f32>,
 
     oscillator: VariableSawOscillator,
     filter: filter::Svf,
@@ -58,7 +52,6 @@ impl Default for Toby {
 
             midi_note_id: 0,
             midi_note_freq: 1.0,
-            midi_note_gain: Smoother::new(SmoothingStyle::Linear(5.0)),
 
             oscillator: VariableSawOscillator::default(),
             filter: filter::Svf::default(),
@@ -176,8 +169,6 @@ impl Plugin for Toby {
             // Smoothing is optionally built into the parameters themselves
             let gain = self.params.gain.smoothed.next();
 
-            // self.oscillator.waveshape =
-
             // This plugin can be either triggered by MIDI or controleld by a parameter
             let sine = {
                 while let Some(event) = next_event {
@@ -190,12 +181,10 @@ impl Plugin for Toby {
                         NoteEvent::NoteOn { note, velocity, .. } => {
                             self.midi_note_id = note;
                             self.midi_note_freq = util::midi_note_to_freq(note);
-                            self.midi_note_gain.set_target(self.sample_rate, velocity);
 
                             match self.envelope.stage {
                                 EnvelopeStage::Attack | EnvelopeStage::Release => {
-                                    self.envelope.trigger(envelope::EnvelopeEvent::Attack)
-                                    log!("")
+                                    self.envelope.trigger(envelope::EnvelopeEvent::Attack);
                                 }
                                 EnvelopeStage::Decay | EnvelopeStage::Sustain => {
                                     self.envelope.timer = 0.0;
@@ -203,13 +192,7 @@ impl Plugin for Toby {
                             }
                         }
                         NoteEvent::NoteOff { note, .. } if note == self.midi_note_id => {
-                            self.midi_note_gain.set_target(self.sample_rate, 0.0);
                             self.envelope.trigger(envelope::EnvelopeEvent::Release)
-                        }
-                        NoteEvent::PolyPressure { note, pressure, .. }
-                            if note == self.midi_note_id =>
-                        {
-                            self.midi_note_gain.set_target(self.sample_rate, pressure);
                         }
                         _ => (),
                     }
