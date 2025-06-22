@@ -1,5 +1,6 @@
 pub mod analog;
 pub mod digital;
+pub mod super_square;
 
 // Ported from Mutable Instruments firmware
 pub fn this_blep_sample(t: f32) -> f32 {

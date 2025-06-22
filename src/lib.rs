@@ -7,6 +7,8 @@ use nih_plug::prelude::*;
 use oscillator::analog::VariableSawOscillator;
 use std::sync::Arc;
 
+use crate::oscillator::super_square::SuperSquareOscillator;
+
 pub struct Toby {
     params: Arc<TobyParams>,
     sample_rate: f32,
@@ -19,7 +21,7 @@ pub struct Toby {
     /// The frequency if the active note, if triggered by MIDI.
     midi_note_freq: f32,
 
-    oscillator: VariableSawOscillator,
+    oscillator: SuperSquareOscillator,
     filter: filter::Svf,
     envelope: envelope::ADSR,
 }
@@ -53,7 +55,7 @@ impl Default for Toby {
             midi_note_id: 0,
             midi_note_freq: 1.0,
 
-            oscillator: VariableSawOscillator::default(),
+            oscillator: SuperSquareOscillator::default(),
             filter: filter::Svf::default(),
             envelope: envelope::ADSR::default(),
         }
@@ -167,67 +169,76 @@ impl Plugin for Toby {
         let mut next_event = context.next_event();
         for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
             // Smoothing is optionally built into the parameters themselves
-            let gain = self.params.gain.smoothed.next();
 
             // This plugin can be either triggered by MIDI or controleld by a parameter
-            let sine = {
-                while let Some(event) = next_event {
-                    // If the event occured after the sample_time, stop
-                    if event.timing() > sample_id as u32 {
-                        break;
-                    }
-
-                    match event {
-                        NoteEvent::NoteOn { note, velocity, .. } => {
-                            self.midi_note_id = note;
-                            self.midi_note_freq = util::midi_note_to_freq(note);
-
-                            match self.envelope.stage {
-                                EnvelopeStage::Attack | EnvelopeStage::Release => {
-                                    self.envelope.trigger(envelope::EnvelopeEvent::Attack);
-                                }
-                                EnvelopeStage::Decay | EnvelopeStage::Sustain => {
-                                    self.envelope.timer = 0.0;
-                                }
-                            }
-                        }
-                        NoteEvent::NoteOff { note, .. } if note == self.midi_note_id => {
-                            self.envelope.trigger(envelope::EnvelopeEvent::Release)
-                        }
-                        _ => (),
-                    }
-
-                    next_event = context.next_event();
+            while let Some(event) = next_event {
+                // If the event occured after the sample_time, stop
+                if event.timing() > sample_id as u32 {
+                    break;
                 }
 
-                // This gain envelope prevents clicks with new notes and with released notes
-                let morph = self.params.morph.smoothed.next();
+                match event {
+                    NoteEvent::NoteOn { note, velocity, .. } => {
+                        self.midi_note_id = note;
+                        self.midi_note_freq = util::midi_note_to_freq(note);
 
-                let saw_pw = if morph < 0.5 {
-                    morph + 0.5
-                } else {
-                    1.0 - (morph - 0.5) * 2.0
-                };
+                        match self.envelope.stage {
+                            EnvelopeStage::Attack | EnvelopeStage::Release => {
+                                self.envelope.trigger(envelope::EnvelopeEvent::Attack);
+                            }
+                            EnvelopeStage::Decay | EnvelopeStage::Sustain => {
+                                self.envelope.timer = 0.0;
+                            }
+                        }
+                    }
+                    NoteEvent::NoteOff { note, .. } if note == self.midi_note_id => {
+                        self.envelope.trigger(envelope::EnvelopeEvent::Release)
+                    }
+                    _ => (),
+                }
 
-                let saw_pw = (saw_pw * 1.1).clamp(0.005, 1.0);
-                let saw_shape = (10.0 - 21.0 * morph).clamp(0.0, 1.0);
+                next_event = context.next_event();
+            }
 
-                self.oscillator
-                    .prepare(saw_pw, saw_shape, self.midi_note_freq, self.sample_rate);
-                let v = self
-                    .oscillator
-                    .process(self.midi_note_freq, self.sample_rate);
-                let v = v * self.envelope.next(self.sample_rate);
+            // This gain envelope prevents clicks with new notes and with released notes
+            let shape = self.params.shape.smoothed.next();
+            let morph = self.params.morph.smoothed.next();
 
+            // let saw_pw = if morph < 0.5 {
+            //     morph + 0.5
+            // } else {
+            //     1.0 - (morph - 0.5) * 2.0
+            // };
+
+            // let saw_pw = (saw_pw * 1.1).clamp(0.005, 1.0);
+            // let saw_shape = (10.0 - 21.0 * morph).clamp(0.0, 1.0);
+
+            // self.oscillator
+            //     .prepare(saw_pw, saw_shape, self.midi_note_freq, self.sample_rate);
+            // let v = self
+            //     .oscillator
+            //     .process(self.midi_note_freq, self.sample_rate);
+
+            let normalized_frequency = self.midi_note_freq / (self.sample_rate + 0.000001);
+            self.oscillator
+                .prepare(shape, normalized_frequency, self.sample_rate);
+
+            for sample in channel_samples {
+                let gain = self.params.gain.smoothed.next();
                 let cutoff = self.params.cutoff.smoothed.next();
                 let resonance = self.params.resonance.smoothed.next();
 
                 self.filter.set_f_q(cutoff / self.sample_rate, resonance);
-                self.filter.process(v)
-            };
 
-            for sample in channel_samples {
-                *sample = sine * util::db_to_gain_fast(gain);
+                let v = self
+                    .oscillator
+                    .process(normalized_frequency, self.sample_rate);
+
+                let v = v * self.envelope.next(self.sample_rate);
+
+                let v = self.filter.process(v);
+
+                *sample = v * util::db_to_gain_fast(gain);
             }
         }
 
