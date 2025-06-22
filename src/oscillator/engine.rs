@@ -2,12 +2,13 @@ use nih_plug::prelude::Enum;
 
 use crate::oscillator::{SuperSquareOscillator, VariableSawOscillator};
 
-#[derive(Enum, PartialEq, Debug)]
+#[derive(Enum, PartialEq, Debug, Clone, Copy)]
 pub enum OscillatorType {
     SuperSquare,
     VariableSaw,
 }
 
+#[derive(Clone, Copy)]
 pub struct OscillatorParams {
     pub shape: f32,
     pub morph: f32,

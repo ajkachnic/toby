@@ -9,6 +9,7 @@ pub struct ADSR {
     pub release: f32,
 
     pub stage: EnvelopeStage,
+    pub step_timer: f32,
     pub timer: f32,
 }
 
@@ -18,9 +19,10 @@ impl Default for ADSR {
             attack: 0.05,
             decay: 0.001,
             sustain: 0.8,
-            release: 0.1,
+            release: 1.0,
 
-            stage: EnvelopeStage::Attack,
+            stage: EnvelopeStage::Idle,
+            step_timer: 0.1,
             timer: 0.0,
         }
     }
@@ -28,11 +30,13 @@ impl Default for ADSR {
 
 impl ADSR {
     pub fn reset(&mut self) {
-        self.stage = EnvelopeStage::Release;
-        self.timer = self.release;
+        self.stage = EnvelopeStage::Idle;
+        self.step_timer = self.release;
+        self.timer = 0.0;
     }
 
     pub fn trigger(&mut self, event: EnvelopeEvent) {
+        self.step_timer = 0.0;
         self.timer = 0.0;
         match event {
             EnvelopeEvent::Attack => {
@@ -45,48 +49,58 @@ impl ADSR {
     }
 
     pub fn next(&mut self, sample_rate: f32) -> f32 {
+        self.timer += 1.0 / sample_rate;
+
         match self.stage {
             EnvelopeStage::Attack => {
-                if self.timer >= self.attack {
+                if self.step_timer >= self.attack {
                     self.stage = EnvelopeStage::Decay;
-                    self.timer = 0.0;
+                    self.step_timer = 0.0;
 
                     return 1.0;
                 }
 
-                self.timer += 1.0 / sample_rate;
+                self.step_timer += 1.0 / sample_rate;
 
-                let x = interpolate(self.timer / self.attack, 0.0, 1.0);
+                let x = interpolate(self.step_timer / self.attack, 0.0, 1.0);
 
                 return x;
             }
             EnvelopeStage::Decay => {
-                if self.timer >= self.decay {
+                if self.step_timer >= self.decay {
                     self.stage = EnvelopeStage::Sustain;
-                    self.timer = 0.0;
+                    self.step_timer = 0.0;
 
                     return self.sustain;
                 }
 
-                self.timer += 1.0 / sample_rate;
+                self.step_timer += 1.0 / sample_rate;
 
                 // Linear step from
-                let x = interpolate(self.timer / self.decay, 1.0, self.sustain);
+                let x = interpolate(self.step_timer / self.decay, 1.0, self.sustain);
 
                 return x;
             }
             EnvelopeStage::Sustain => self.sustain,
             EnvelopeStage::Release => {
-                if self.timer >= self.release {
+                if self.step_timer >= self.release {
+                    self.stage = EnvelopeStage::Idle;
+                    self.step_timer = 0.0;
+
                     return 0.0;
                 }
 
-                self.timer += 1.0 / sample_rate;
+                self.step_timer += 1.0 / sample_rate;
 
-                let x = interpolate(self.timer / self.release, self.sustain, 0.0);
+                let x = interpolate(self.step_timer / self.release, self.sustain, 0.0);
                 return x;
             }
+            EnvelopeStage::Idle => 0.0,
         }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.stage != EnvelopeStage::Idle
     }
 }
 
@@ -101,6 +115,9 @@ pub enum EnvelopeStage {
     Decay,
     Sustain,
     Release,
+
+    /// The envelope is idle, not triggered
+    Idle,
 }
 
 /// Linear interpolation between two values

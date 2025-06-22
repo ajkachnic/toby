@@ -1,28 +1,22 @@
 mod envelope;
 mod filter;
 mod oscillator;
+pub mod voice;
 
 use envelope::EnvelopeStage;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
-use crate::oscillator::engine::{OscillatorEngine, OscillatorParams, OscillatorType};
+use crate::{
+    oscillator::engine::{OscillatorEngine, OscillatorParams, OscillatorType},
+    voice::{Voice, VoiceParams},
+};
 
 pub struct Toby {
     params: Arc<TobyParams>,
     sample_rate: f32,
 
-    /// The current phase of the sine wave, always kept between in `[0, 1]`.
-    phase: f32,
-
-    /// The MIDI note ID of the active note, if triggered by MIDI.
-    midi_note_id: u8,
-    /// The frequency if the active note, if triggered by MIDI.
-    midi_note_freq: f32,
-
-    oscillator: OscillatorEngine,
-    filter: filter::Svf,
-    envelope: envelope::ADSR,
+    voices: [Voice; 6],
 }
 
 #[derive(Params)]
@@ -52,14 +46,14 @@ impl Default for Toby {
             params: Arc::new(TobyParams::default()),
             sample_rate: 1.0,
 
-            phase: 0.0,
-
-            midi_note_id: 0,
-            midi_note_freq: 1.0,
-
-            oscillator: OscillatorEngine::default(),
-            filter: filter::Svf::default(),
-            envelope: envelope::ADSR::default(),
+            voices: [
+                Voice::new(),
+                Voice::new(),
+                Voice::new(),
+                Voice::new(),
+                Voice::new(),
+                Voice::new(),
+            ],
         }
     }
 }
@@ -158,10 +152,9 @@ impl Plugin for Toby {
     }
 
     fn reset(&mut self) {
-        self.phase = 0.0;
-        self.midi_note_id = 0;
-        self.midi_note_freq = 1.0;
-        self.envelope.reset();
+        for voice in self.voices.iter_mut() {
+            voice.envelope.reset();
+        }
     }
 
     fn process(
@@ -172,6 +165,27 @@ impl Plugin for Toby {
     ) -> ProcessStatus {
         let samples = buffer.samples();
         let mut next_event = context.next_event();
+
+        let shape = self.params.shape.smoothed.next_step(samples as u32);
+        let morph = self.params.morph.smoothed.next_step(samples as u32);
+        let gain = self.params.gain.smoothed.next_step(samples as u32);
+        let cutoff = self.params.cutoff.smoothed.next_step(samples as u32);
+        let oscillator_type = self.params.oscillator_type.value();
+        let resonance = self.params.resonance.smoothed.next_step(samples as u32);
+
+        let voice_params = VoiceParams {
+            oscillator_type,
+            shape,
+            morph,
+            gain,
+            cutoff,
+            resonance,
+        };
+
+        for voice in self.voices.iter_mut() {
+            voice.prepare_block(voice_params, self.sample_rate);
+        }
+
         for (sample_id, channel_samples) in buffer.iter_samples().enumerate() {
             // Smoothing is optionally built into the parameters themselves
 
@@ -184,20 +198,59 @@ impl Plugin for Toby {
 
                 match event {
                     NoteEvent::NoteOn { note, velocity, .. } => {
-                        self.midi_note_id = note;
-                        self.midi_note_freq = util::midi_note_to_freq(note);
+                        // multi-pass voice allocation
+                        let mut found_voice = false;
 
-                        match self.envelope.stage {
-                            EnvelopeStage::Attack | EnvelopeStage::Release => {
-                                self.envelope.trigger(envelope::EnvelopeEvent::Attack);
-                            }
-                            EnvelopeStage::Decay | EnvelopeStage::Sustain => {
-                                self.envelope.timer = 0.0;
+                        // 1. find a voice with the same note id
+                        for voice in self.voices.iter_mut() {
+                            if voice.midi_note_id == note {
+                                voice.trigger(note, velocity);
+                                found_voice = true;
+                                break;
                             }
                         }
+
+                        // 2. find an inactive voice
+                        if !found_voice {
+                            for voice in self.voices.iter_mut() {
+                                if !voice.is_active() {
+                                    voice.trigger(note, velocity);
+                                    found_voice = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 3. voice stealing: prefer an releasing voice
+                        if !found_voice {
+                            for voice in self.voices.iter_mut() {
+                                if voice.envelope.stage == EnvelopeStage::Release {
+                                    voice.trigger(note, velocity);
+                                    found_voice = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 4. voice stealing: prefer the oldest voice
+                        if !found_voice {
+                            let victim = self
+                                .voices
+                                .iter_mut()
+                                .max_by(|a, b| {
+                                    a.envelope.timer.partial_cmp(&b.envelope.timer).unwrap()
+                                })
+                                .unwrap();
+                            victim.trigger(note, velocity);
+                        }
                     }
-                    NoteEvent::NoteOff { note, .. } if note == self.midi_note_id => {
-                        self.envelope.trigger(envelope::EnvelopeEvent::Release)
+                    NoteEvent::NoteOff { note, .. } => {
+                        for voice in self.voices.iter_mut() {
+                            if voice.midi_note_id == note {
+                                voice.release();
+                                break;
+                            }
+                        }
                     }
                     _ => (),
                 }
@@ -205,32 +258,13 @@ impl Plugin for Toby {
                 next_event = context.next_event();
             }
 
-            let shape = self.params.shape.smoothed.next_step(samples as u32);
-            let morph = self.params.morph.smoothed.next_step(samples as u32);
-            let osc_params = OscillatorParams { shape, morph };
-
-            let oscillator_type = self.params.oscillator_type.value();
-            self.oscillator.selected = oscillator_type;
-
-            self.oscillator
-                .prepare_block(osc_params, self.midi_note_freq, self.sample_rate);
-
             for sample in channel_samples {
-                let gain = self.params.gain.smoothed.next();
-                let cutoff = self.params.cutoff.smoothed.next();
-                let resonance = self.params.resonance.smoothed.next();
+                let mut v = 0.0;
+                for voice in self.voices.iter_mut() {
+                    v += voice.process(voice_params, self.sample_rate);
+                }
 
-                self.filter.set_f_q(cutoff / self.sample_rate, resonance);
-
-                let v = self
-                    .oscillator
-                    .process(self.midi_note_freq, self.sample_rate);
-
-                let v = v * self.envelope.next(self.sample_rate);
-
-                let v = self.filter.process(v);
-
-                *sample = v * util::db_to_gain_fast(gain);
+                *sample = v;
             }
         }
 

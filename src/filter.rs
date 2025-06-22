@@ -37,7 +37,7 @@ impl Default for Svf {
 impl Svf {
     /// Set frequency and resonance from true units.
     pub fn set_f_q(&mut self, f: f32, resonance: f32) {
-        self.g = tan(f);
+        self.g = (std::f32::consts::PI * f).tan();
         self.r = 1.0 / resonance;
         self.h = 1.0 / (1.0 + self.r * self.g + self.g * self.g);
     }
