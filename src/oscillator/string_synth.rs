@@ -81,24 +81,32 @@ impl StringSynthOscillator {
         self.phase += frequency;
 
         let mut next_segment = self.phase as i32;
+
+        // Handle discontinuities
         if next_segment != self.segment {
             let mut discontinuity = 0.0;
+
+            // 8-segment saw (fundamental) resets when segment = 8
             if next_segment == 8 {
                 self.phase -= 8.0;
                 next_segment -= 8;
                 discontinuity -= saw_8_gain;
             }
 
+            // 4-segment saw resets when bit2 is 0
             if (next_segment & 3) == 0 {
                 discontinuity -= saw_4_gain;
             }
 
+            // 2-segment saw resets when bit1 is 0
             if (next_segment & 1) == 0 {
                 discontinuity -= saw_2_gain;
             }
 
+            // 1-segment saw flips every segment
             discontinuity -= saw_1_gain;
 
+            // place BLEP at fractional crossing
             if discontinuity != 0.0 {
                 let fraction = self.phase - next_segment as f32;
                 let t = fraction / frequency;

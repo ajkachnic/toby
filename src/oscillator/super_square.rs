@@ -18,9 +18,12 @@ pub struct SuperSquareOscillator {
 }
 
 impl SuperSquareOscillator {
+    /// Prepare the oscillator for a new block of samples.
     pub fn prepare_block(&mut self, shape: f32, frequency: f32, sample_rate: f32) {
         let phase_delta = frequency / sample_rate;
         let master_frequency = phase_delta;
+
+        // Square-shape morph: <0.5 = PWM-ish (slave slower); >=0.5 = “supersquare” (slave faster)
         let slave_frequency = if shape < 0.5 {
             phase_delta * (0.51 + 0.98 * shape)
         } else {
@@ -53,10 +56,11 @@ impl SuperSquareOscillator {
         self.master_phase += master_frequency;
         if self.master_phase >= 1.0 {
             self.master_phase -= 1.0;
+
             reset_time = self.master_phase / master_frequency;
+            reset = true;
 
             let mut slave_phase_at_reset = self.slave_phase + (1.0 - reset_time) * slave_frequency;
-            reset = true;
 
             if slave_phase_at_reset >= 1.0 {
                 slave_phase_at_reset -= 1.0;

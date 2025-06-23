@@ -1,6 +1,9 @@
 mod envelope;
 mod filter;
+pub mod modulator;
 mod oscillator;
+pub mod resources;
+pub mod util;
 pub mod voice;
 
 use envelope::EnvelopeStage;
@@ -79,7 +82,7 @@ impl Default for TobyParams {
                 FloatRange::Skewed {
                     min: 1.0,
                     max: 20_000.0,
-                    factor: FloatRange::skew_factor(-2.0),
+                    factor: FloatRange::skew_factor(-1.0),
                 },
             )
             .with_smoother(SmoothingStyle::Linear(10.0))
